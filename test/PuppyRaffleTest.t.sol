@@ -16,11 +16,7 @@ contract PuppyRaffleTest is Test {
     uint256 duration = 1 days;
 
     function setUp() public {
-        puppyRaffle = new PuppyRaffle(
-            entranceFee,
-            feeAddress,
-            duration
-        );
+        puppyRaffle = new PuppyRaffle(entranceFee, feeAddress, duration);
     }
 
     //////////////////////
@@ -212,5 +208,45 @@ contract PuppyRaffleTest is Test {
         puppyRaffle.selectWinner();
         puppyRaffle.withdrawFees();
         assertEq(address(feeAddress).balance, expectedPrizeAmount);
+    }
+
+    function testDos() public {
+        // 100 payers
+        uint256 playersNum = 100;
+        address[] memory players = new address[](playersNum);
+
+        for (uint256 i = 0; i < playersNum; i++) {
+            players[i] = address(i);
+        }
+
+        uint256 gasStart = gasleft();
+
+        puppyRaffle.enterRaffle{value: entranceFee * playersNum}(players);
+
+        uint256 gasEnd = gasleft();
+
+        uint256 gasUsedFirst = gasStart - gasEnd;
+
+        console.log("gasUsedFirst", gasUsedFirst);
+
+        // 2nd 100 payers
+
+        address[] memory playersTwo = new address[](playersNum);
+
+        for (uint256 i = 0; i < playersNum; i++) {
+            playersTwo[i] = address(i + playersNum);
+        }
+
+        gasStart = gasleft();
+
+        puppyRaffle.enterRaffle{value: entranceFee * playersNum}(playersTwo);
+
+        gasEnd = gasleft();
+
+        uint256 gasUsedSecond = gasStart - gasEnd;
+
+        console.log("gasUsedSecond", gasUsedSecond);
+
+        assert(gasUsedSecond > gasUsedFirst);
     }
 }
