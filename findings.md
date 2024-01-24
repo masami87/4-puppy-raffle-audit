@@ -1,4 +1,4 @@
-### [M-#] Looping through players array to check for duplicates in `PuppyRaffle:enterRaffle` is a potential denail of service (DoS) attack, incrementing gas costs for future entrants
+### [M-1] Looping through players array to check for duplicates in `PuppyRaffle:enterRaffle` is a potential denail of service (DoS) attack, incrementing gas costs for future entrants
 
 **Description:** Gas will grow.
 
@@ -65,3 +65,39 @@ If we have 2 sets of 100 players enter, the gas costs will be such:
 1. Consider allowing duplicates.
 
 2. Consider using a mapping to check for duplicates.
+
+### [I-1]: Solidity pragma should be specific, not wide
+
+Consider using a specific version of Solidity in your contracts instead of a wide version. For example, instead of `pragma solidity ^0.8.0;`, use `pragma solidity 0.8.0;`
+
+### [I-2] Magic Numbers
+
+**Description:** All number literals should be replaced with constants. This makes the code more readable and easier to maintain. Numbers without context are called "magic numbers".
+
+**Recommended Mitigation:** Replace all magic numbers with constants.
+
+```diff
++       uint256 public constant PRIZE_POOL_PERCENTAGE = 80;
++       uint256 public constant FEE_PERCENTAGE = 20;
++       uint256 public constant TOTAL_PERCENTAGE = 100;
+.
+.
+.
+-        uint256 prizePool = (totalAmountCollected * 80) / 100;
+-        uint256 fee = (totalAmountCollected * 20) / 100;
+         uint256 prizePool = (totalAmountCollected * PRIZE_POOL_PERCENTAGE) / TOTAL_PERCENTAGE;
+         uint256 fee = (totalAmountCollected * FEE_PERCENTAGE) / TOTAL_PERCENTAGE;
+```
+
+### [I-4] Zero address validation
+
+**Description:** The `PuppyRaffle` contract does not validate that the `feeAddress` is not the zero address. This means that the `feeAddress` could be set to the zero address, and fees would be lost.
+
+```
+PuppyRaffle.constructor(uint256,address,uint256)._feeAddress (src/PuppyRaffle.sol#57) lacks a zero-check on :
+                - feeAddress = _feeAddress (src/PuppyRaffle.sol#59)
+PuppyRaffle.changeFeeAddress(address).newFeeAddress (src/PuppyRaffle.sol#165) lacks a zero-check on :
+                - feeAddress = newFeeAddress (src/PuppyRaffle.sol#166)
+```
+
+**Recommended Mitigation:** Add a zero address check whenever the `feeAddress` is updated.
